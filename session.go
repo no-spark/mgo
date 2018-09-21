@@ -879,6 +879,45 @@ func (db *Database) RunCommand(commandName string, commandArgs, metadata, docs, 
 	return db.runCommand(socket, commandName, commandArgs, metadata, docs, result)
 }
 
+// SimpleRun and simpleRun are used to return byte array. @vinllen
+func (db *Database) SimpleRun(cmd interface{}) (result []byte, err error) {
+	socket, err := db.Session.acquireSocket(true)
+	if err != nil {
+		return nil, err
+	}
+	defer socket.Release()
+
+	return db.simpleRun(socket, cmd)
+}
+
+func (db *Database) simpleRun(socket *mongoSocket, cmd interface{}) (result []byte, err error) {
+	if name, ok := cmd.(string); ok {
+		cmd = bson.D{{name, 1}}
+	}
+
+	// Collection.Find:
+	session := db.Session
+	session.m.RLock()
+	op := session.queryConfig.op // Copy.
+	session.m.RUnlock()
+	op.query = cmd
+	op.collection = db.Name + ".$cmd"
+
+	// Query.One:
+	session.prepareQuery(&op)
+	op.limit = -1
+
+	data, err := socket.SimpleQuery(&op)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, ErrNotFound
+	}
+
+	return data, checkQueryError(op.collection, data)
+}
+
 // Credential holds details to authenticate with a MongoDB server.
 type Credential struct {
 	// Username and Password hold the basic details for authentication.
