@@ -28,6 +28,7 @@ package mgo
 
 import (
 	"crypto/md5"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -324,6 +325,7 @@ func ParseURL(url string) (*DialInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	ssl := false
 	direct := false
 	mechanism := ""
 	service := ""
@@ -337,6 +339,10 @@ func ParseURL(url string) (*DialInfo, error) {
 	maxIdleTimeMS := 0
 	for _, opt := range uinfo.options {
 		switch opt.key {
+		case "ssl":
+			if v, err := strconv.ParseBool(opt.value); err == nil && v {
+				ssl = true
+			}
 		case "authSource":
 			source = opt.value
 		case "authMechanism":
@@ -433,6 +439,13 @@ func ParseURL(url string) (*DialInfo, error) {
 		ReplicaSetName: setName,
 		MinPoolSize:    minPoolSize,
 		MaxIdleTimeMS:  maxIdleTimeMS,
+	}
+	if ssl && info.DialServer == nil {
+		// Set DialServer only if nil, we don't want to override user's settings.
+		info.DialServer = func(addr *ServerAddr) (net.Conn, error) {
+			conn, err := tls.Dial("tcp", addr.String(), &tls.Config{})
+			return conn, err
+		}
 	}
 	return &info, nil
 }
@@ -1861,13 +1874,13 @@ func simpleIndexKey(realKey bson.D) (key []string) {
 			}
 		case int:
 			vi = realKey[i].Value.(int)
-        case bool:
+		case bool:
 			vb, _ := realKey[i].Value.(bool)
-            if vb {
-                vi = 1 // set to 1 if true
-            } else {
-                vi = 0
-            }
+			if vb {
+				vi = 1 // set to 1 if true
+			} else {
+				vi = 0
+			}
 		}
 
 		if vi == 1 {
@@ -1878,7 +1891,7 @@ func simpleIndexKey(realKey bson.D) (key []string) {
 			key = append(key, "-"+field)
 			continue
 		}
-        // do not panic whatever
+		// do not panic whatever
 		// panic("Got unknown index key type for field " + field)
 	}
 	return
@@ -2784,7 +2797,6 @@ func (p *Pipe) SetMaxTime(d time.Duration) *Pipe {
 	return p
 }
 
-
 // Collation allows to specify language-specific rules for string comparison,
 // such as rules for lettercase and accent marks.
 // When specifying collation, the locale field is mandatory; all other collation
@@ -2827,7 +2839,7 @@ func (err *LastError) Error() string {
 type CmdError struct {
 	Ok          int64                    `bson:"ok"`
 	N           int64                    `bson:"n"`
-	Code           int                    `bson:"code"`
+	Code        int                      `bson:"code"`
 	ErrMsg      string                   `bson:"errmsg"`
 	WriteErrors []map[string]interface{} `bson:"writeErrors"`
 }
